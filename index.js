@@ -11,23 +11,27 @@ app.use(express.urlencoded({ extended: false }));
 
 // Validate URL
 const validateUrl = (req, res, next) => {
-  const url = encodeURI(req.query.url);
-  if (!url || !validator.isURL(url)) {
+  const url = req.query.url;
+  
+  // Perbaiki logika encode. Hanya validasi string aktual untuk mencegah bug
+  if (!url || !validator.isURL(String(url), { require_protocol: true })) {
     console.error('Invalid URL:', url);
     return res.status(400).send('Invalid url');
   }
 
   console.log('Valid URL:', url);
+  req.targetUrl = url;
   next();
 };
 
 // Convert subtitle
 const convertSubtitle = async (req, res, next) => {
   try {
-    const url = req.query.url;
+    const url = req.targetUrl;
     console.log('Converting subtitle from URL:', url);
 
-    const response = await axios.get(url);
+    // Tambahkan responseType untuk menangani file teks dengan lebih baik
+    const response = await axios.get(url, { responseType: 'text' });
 
     console.log('Subtitle fetched successfully from URL:', url);
 
@@ -41,14 +45,14 @@ const convertSubtitle = async (req, res, next) => {
     req.subtitle = subtitle;
     next();
   } catch (err) {
-    console.error('Error fetching or converting subtitle:', err);
+    console.error('Error fetching or converting subtitle:', err.message);
     return res.status(500).send('Server error');
   }
 };
 
 // Route handler
 app.get('/', validateUrl, convertSubtitle, async (req, res) => {
-  res.setHeader('Content-Type', 'text/vtt');
+  res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Origin, Content-Type, X-Auth-Token');
@@ -69,7 +73,7 @@ const convertUploadedSubtitle = (req, res, next) => {
     }
 
     console.log('Converting uploaded subtitle file');
-    const { subtitle } = convert(req.file.buffer.toString(), '.vtt');
+    const { subtitle } = convert(req.file.buffer.toString('utf-8'), '.vtt');
     if (!subtitle) {
       console.error('Uploaded subtitle conversion failed');
       return res.status(400).send('Cannot convert');
@@ -79,18 +83,24 @@ const convertUploadedSubtitle = (req, res, next) => {
     req.subtitle = subtitle;
     next();
   } catch (err) {
-    console.error('Error converting uploaded subtitle:', err);
+    console.error('Error converting uploaded subtitle:', err.message);
     return res.status(500).send('Server error');
   }
 };
 
 // Route handler for the new upload functionality
 app.post('/upload', newUpload.single('subtitleFile'), convertUploadedSubtitle, (req, res) => {
-  res.setHeader('Content-Type', 'text/vtt');
+  res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
   res.send(req.subtitle);
   console.log('Response sent');
 });
 
-app.listen(5000, () => {
-  console.log('Server running on port 5000');
-});
+// Hanya listen port jika tidak di server Vercel (contoh saat run lokal)
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(5000, () => {
+    console.log('Server running on port 5000');
+  });
+}
+
+// PENTING UNTUK VERCEL: Export express app agar bisa ditangani serverless Node
+module.exports = app;
